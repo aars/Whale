@@ -39,7 +39,6 @@ prompt(exchangers, args.all).then((answer) => {
   CFonts.say('Whale, show Ethereum and Bitcoin price in command line interface (CLI).|Loading...', {
     font: 'console',
     align: 'left',
-    colors: ['candy'],
     letterSpacing: 1,
     lineHeight: 1.8,
     space: true,

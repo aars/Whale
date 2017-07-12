@@ -1,5 +1,16 @@
 const dateFormat = require('dateformat');
 
+exports.formatPeriod = function(p) {
+  // expect minutes as int or strings.
+  if (!Number.isInteger(p)) { return p; }
+
+  // minutes, hours, days, weeks.
+  if (p < 60)    return p+'m';
+  if (p < 1440)  return p/60+'h';
+  if (p < 10080) return p/1440+'D';
+  return p/10080+'W';
+}
+
 exports.formatDecimal = function(number, place = 4) {
   if (!number || Number(number) === 0) return 0
   return Number(number).toFixed(place)

@@ -14,7 +14,7 @@ class Whale {
     this.exchange      = exchange;
     this.markets       = markets;
     this.currentMarket = markets[0];
-    this.currentPeriod = exchange.periods[0];
+    this.currentPeriod = exchange.defaultPeriod || exchange.periods[0];
     this.data = {};
 
     this.running = false;
@@ -162,9 +162,15 @@ class Whale {
       return process.exit(0)
     });
 
-    this.screen.key(['?'], (ch, key) => {
-      this.toggleHelp();
+    // priceTrend period keys
+    const periods = this.exchange.periods;
+    const periodKeys = Array(periods.length).fill(1).map((v, idx) => { return idx+1 });
+    this.screen.key(periodKeys, (ch, key) => {
+      this.currentPeriod = periods[ch-1];
+      this.updatePriceTrend();
     });
+
+    this.screen.key(['?'], this.help.show.bind(this.help));
   }
 
   drawHelp() {
@@ -202,7 +208,7 @@ class Whale {
                    , style: { line: this.config.colors.chartLine }}
 
     this.line.setData(series);
-    this.line.setLabel(` ${data.currentMarket} -- Price Trend `)
+    this.line.setLabel(` ${data.currentMarket} -- Price Trend -- ${utils.formatPeriod(this.currentPeriod)} `)
     this.screen.render();
   }
 
@@ -221,7 +227,7 @@ class Whale {
   updatePriceTrend() {
     if (!this.running) return;
 
-    this.logMsg(`Fetching ${this.currentMarket} price trend...`);
+    this.logMsg(`Fetching ${this.currentMarket} price trend... (i:${utils.formatPeriod(this.currentPeriod)})`);
     api.getPriceTrend(this.exchange, this.currentMarket, null, this.currentPeriod).then((data) => {
       this.data.priceTrend = data;
       this.updateLine();
