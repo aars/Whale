@@ -40,6 +40,7 @@
     "cfonts": "^1.0.2",
     "colors": "^1.1.2",
     "commander": "^2.9.0",
+    "dateformat": "^2.0.0",
     "inquirer": "^1.2.3",
     "superagent": "^2.3.0"
   }

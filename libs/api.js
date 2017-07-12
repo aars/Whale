@@ -17,6 +17,6 @@ exports.getCurrentPrice = function(exchange, markets) {
   });
 }
 
-exports.getPriceTrend = function(exchange, currentMarket) {
-  return sea.getPriceTrend(exchange, currentMarket)
+exports.getPriceTrend = function(exchange, currentMarket, since, period) {
+  return sea.getPriceTrend(exchange, currentMarket, since, period);
 }

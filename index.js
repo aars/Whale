@@ -6,46 +6,51 @@ const wash = require('./libs/wash')
 
 class Whale {
   constructor(config, exchange, markets) {
-    this.config = config;
-    this.cacheData = {}
+    this.config        = config;
+    this.exchange      = exchange;
+    this.markets       = markets;
+    this.currentMarket = markets[0];
+    this.currentPeriod = exchange.periods[0];
+    this.data = {};
 
-    this.fetchPrice(exchange, markets).then((data) => {
-      this.screen = blessed.screen()
-      this.grid = new contrib.grid({
-        screen: this.screen,
-        rows: 12,
-        cols: 12,
-        color: this.config.colors.border
-      })
-      this.cacheData = data
+    this.fetchAll().then((data) => {
+      this.data = data;
+      this.lastUpdate = new Date();
 
-      this.initDashBoard(data, exchange)
-      this.eventListeners(config.interval, exchange, markets)
-    }).catch((err) => {
-      console.error('fetchPrice', err)
-      process.exit(1)
-    })
+      this.initScreen();
+      this.initDashBoard();
+      this.eventListeners();
+    }).catch(this.errorHandler.bind(this, 'fetchPrice'));
   }
 
-  fetchPrice(exchange, markets) {
-    const currentMarket = markets[0]
-
+  fetchAll() {
     return new Promise((resolve, reject) => {
       Promise.all([
-        api.getCurrentPrice(exchange, markets),
-        api.getPriceTrend(exchange, currentMarket),
+        api.getCurrentPrice(this.exchange, this.markets),
+        api.getPriceTrend(this.exchange, this.currentMarket, null, this.currentPeriod)
       ]).then((res) => {
         resolve({
-          currentPrice: wash.currentPrice(exchange, res[0]),
-          priceTrend: res[1],
+          currentPrice: res[0],
+          priceTrend: res[1]
         })
-      }).catch((err) => {
-        reject(err)
-      })
+      }).catch(reject);
     })
   }
 
-  initDashBoard(data, exchange) {
+  initScreen() {
+    this.screen = blessed.screen({
+      smartCSR: true,
+      title: `Whale -- ${this.exchange.name}`
+    });
+    this.grid = new contrib.grid({
+      screen: this.screen,
+      rows: 12,
+      cols: 12,
+      color: this.config.colors.border
+    });
+  }
+
+  initDashBoard() {
     this.table = this.grid.set(0, 0, 4, 12, contrib.table,
       { keys: true
       , vi: true
@@ -53,91 +58,141 @@ class Whale {
       , selectedFg: this.config.colors.tableSelectedFg
       , selectedBg: this.config.colors.tableSelectedBg
       , interactive: true
-      , label: ` ${exchange.name} -- Current Price `
       , columnSpacing: 10
       , padding: { top: this.config.tableHeaders ? 0 : -1 }
-      , columnWidth: [10, 10, 10] })
+      , columnWidth: [10, 10, 10] });
 
-    this.line = this.grid.set(4, 0, 7, 12, contrib.line,
-      { label: ` ${data.priceTrend.currentMarket} -- Price Trend (recent month) `
-      , style: {
+    this.table.rows.on('select', (item, idx) => {
+      this.currentMarket = this.data.currentPrice[idx].name;
+      this.updatePriceTrend();
+    })
+
+    this.line = this.grid.set(4, 0, 8, 12, contrib.line,
+      { style: {
           baseline: this.config.colors.chartBaseline
         , text: this.config.colors.chartText }
-      , showLegend: this.config.showLegend })
+      , showLegend: this.config.showLegend });
 
-    this.log = this.grid.set(11, 0, 1, 12, contrib.log,
+    this.log = this.grid.set(11, 6, 1, 6, contrib.log,
       { fg: this.config.colors.logFg
       , selectedFg: this.config.colors.logSelectedFg
-      , label: 'Server Log' })
+      , label: { text: ' Log ', side: 'right' }});
+    this.log.setBack();
 
-    this.createTable(data.currentPrice)
-    this.createLine(data.priceTrend)
-    this.createLog(utils.formatCurrentTime())
+    this.help = blessed.box({
+      top: 'center',
+      left: 'center',
+      width: '80%',
+      height: '50%',
+      border: { type: 'line' },
+      style: { border: { fg: this.config.colors.border } },
+      padding: { left: 2, top: 1, bottom: 1, right: 2 },
+      label: ' Help ',
+    });
+    this.help.hide();
+    this.screen.append(this.help);
+    this.drawHelp();
 
-    this.table.rows.on('select', (item, selectedIndex) => {
-      this.updatePriceTrend(exchange, this.cacheData.currentPrice[selectedIndex][0])
-    })
+    this.updateTable();
+    this.updateLine();
   }
 
-  eventListeners(interval, exchange, markets) {
-    this.timer = setInterval(() => {
-      this.createLog('Loading...')
-      api.getCurrentPrice(exchange, markets).then((res) => {
-        this.createTable(wash.currentPrice(exchange, res))
-        this.createLog(utils.formatCurrentTime())
-      }).catch((err) => {
-        console.error(`\n Load failure: ${err}`)
-        process.exit(1)
-      })
-    }, 1000 * (Number.isInteger(interval) ? interval : 180))
+  eventListeners() {
+    const priceInterval = this.config.priceInterval * 1000;
+    const trendInterval = this.config.trendInterval * 1000;
+    this.timers = {
+      price: setInterval(this.updateCurrentPrice.bind(this), priceInterval),
+      trend: setInterval(this.updatePriceTrend.bind(this), trendInterval)
+    };
 
     this.screen.on('resize', () => {
-      utils.throttle(() => {
-        this.initDashBoard(this.cacheData, exchange)
-      }, 360)()
-    })
+      utils.throttle(this.initDashBoard.bind(this), 360)();
+    });
 
-    this.screen.key(['escape', 'q', 'C-c'], function(ch, key) {
+    this.screen.key(['escape', 'q', 'C-c'], (ch, key) => {
       this.timer && clearInterval(this.timer)
       return process.exit(0)
-    })
+    });
+
+    this.screen.key(['?'], (ch, key) => {
+      this.toggleHelp();
+    });
   }
 
-  createTable(data) {
+  drawHelp() {
+    console.log(this.exchange);
+    // Periods
+    let str = "PriceTrend interval: [key] interval\r\n";
+    let key = 1;
+    this.exchange.periods.forEach(p => {
+      str += `[${key}] ${p} `
+      key++;
+    });
+    this.help.setContent(str);
+  }
+
+  updateTable() {
     this.table.setData({
-      headers: this.config.tableHeaders ? ['Asset Name', 'Price', 'Change'] : [],
-      data: data,
-    })
+      headers: this.config.tableHeaders ? ['Market', 'Price', 'Change'] : [],
+      data: wash.currentPrice(this.exchange, this.data.currentPrice)
+    });
 
-    this.table.focus()
-    this.screen.render()
+    const lastUpdate = utils.formatCurrentTime(this.lastUpdate);
+    this.table.setLabel(` ${this.exchange.name} -- Current Price -- (${lastUpdate}) `);
+    this.table.focus();
+    this.screen.render();
   }
 
-  createLine(data) {
+  updateLine() {
+    const data   = this.data.priceTrend;
     const series = { title: data.currentMarket
-                     , x: data.labels
-                     , y: data.closePricesList
-                     , style: { line: this.config.colors.chartLine }}
+                   , x: data.labels
+                   , y: data.closePricesList
+                   , style: { line: this.config.colors.chartLine }}
 
-    this.line.setData(series)
-    this.line.setLabel(` ${data.currentMarket} -- Price Trend (recent month) `)
-    this.screen.render()
+    this.line.setData(series);
+    this.line.setLabel(` ${data.currentMarket} -- Price Trend `)
+    this.screen.render();
+  }
+
+  updateCurrentPrice() {
+    this.createLog(`Fetching current prices...`);
+    api.getCurrentPrice(this.exchange, this.markets).then((res) => {
+      this.data.currentPrice = res;
+      this.lastUpdate = new Date();
+      this.updateTable();
+      this.hideLog();
+    }).catch(this.errorHandler.bind(this));
+  }
+
+  updatePriceTrend() {
+    this.createLog(`Fetching ${this.currentMarket} price trend...`)
+    api.getPriceTrend(this.exchange, this.currentMarket, null, this.currentPeriod).then((data) => {
+      this.data.priceTrend = data;
+      this.updateLine();
+      this.hideLog();
+    }).catch(this.errorHandler.bind(this));
   }
 
   createLog(data) {
-    this.log.log(data)
-    this.screen.render()
+    this.log.setFront();
+    this.log.log(data);
+    this.screen.render();
   }
 
-  updatePriceTrend(exchange, selectedMarket) {
-    this.createLog(`Loading ${selectedMarket} data...`)
-    api.getPriceTrend(exchange, selectedMarket).then((data) => {
-      this.createLine(data)
-      this.createLog(utils.formatCurrentTime())
-    }).catch((err) => {
-      console.error('updatePriceTrend', err)
-      process.exit(1)
-    })
+  hideLog() {
+    this.log.setBack();
+    this.screen.render();
+  }
+
+  toggleHelp() {
+    this.help.visible ? this.help.hide() : this.help.show();
+    this.screen.render();
+  }
+
+  errorHandler(from, err) {
+    console.error(`[FATAL][${from || '?'}]`, err);
+    process.exit(1);
   }
 }
 

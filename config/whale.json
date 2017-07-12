@@ -1,5 +1,6 @@
 {
-  "interval": 180,
+  "priceInterval": 180,
+  "trendInterval": 3600,
   "showLegend": false,
   "tableHeaders": true,
 

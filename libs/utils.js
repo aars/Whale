@@ -1,3 +1,4 @@
+const dateFormat = require('dateformat');
 
 exports.formatDecimal = function(number, place = 4) {
   if (!number || Number(number) === 0) return 0
@@ -34,16 +35,7 @@ exports.formatDate = function(date, fmt) {
   return fmt
 }
 
-exports.formatCurrentTime = function() {
-  const currentdate = new Date()
-  const datetime =
-    "Last Sync: "
-    + currentdate.getDate() + "/"
-    + (currentdate.getMonth()+1)  + "/"
-    + currentdate.getFullYear() + " @ "
-    + currentdate.getHours() + ":"
-    + currentdate.getMinutes() + ":"
-    + currentdate.getSeconds()
-
-  return datetime
+exports.formatCurrentTime = function (date) {
+  date = date || new Date()
+  return dateFormat(date, 'dd/mm/yy HH:MM:ss');
 }
