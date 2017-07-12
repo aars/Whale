@@ -4,6 +4,10 @@ const api = require('./libs/api')
 const utils = require('./libs/utils')
 const wash = require('./libs/wash')
 
+const icons = {
+  whale: '🐳'
+};
+
 class Whale {
   constructor(config, exchange, markets) {
     this.config        = config;
@@ -13,14 +17,27 @@ class Whale {
     this.currentPeriod = exchange.periods[0];
     this.data = {};
 
+    this.running = false;
+    this.initScreen();
+    this.initDashBoard();
+    this.eventListeners();
+
+    this.init();
+  }
+
+  init() {
+    this.logMsg('Fetching initial data...');
     this.fetchAll().then((data) => {
+      this.running = true;
       this.data = data;
       this.lastUpdate = new Date();
-
-      this.initScreen();
-      this.initDashBoard();
-      this.eventListeners();
-    }).catch(this.errorHandler.bind(this, 'fetchPrice'));
+      this.hideLog();
+      this.updateTable();
+      this.updateLine();
+    }).catch((err) => {
+      this.hideLog();
+      this.errorHandler(err, this.init.bind(this));
+    });
   }
 
   fetchAll() {
@@ -40,7 +57,9 @@ class Whale {
   initScreen() {
     this.screen = blessed.screen({
       smartCSR: true,
-      title: `Whale -- ${this.exchange.name}`
+      forceUnicode: true,
+      fullUnicode: true,
+      title: `${icons.whale} ${this.exchange.name}`
     });
     this.grid = new contrib.grid({
       screen: this.screen,
@@ -59,10 +78,13 @@ class Whale {
       , selectedBg: this.config.colors.tableSelectedBg
       , interactive: true
       , columnSpacing: 10
+      , label: ` ${icons.whale}  ${this.exchange.name} -- Current Price -- (No Data) `
       , padding: { top: this.config.tableHeaders ? 0 : -1 }
       , columnWidth: [10, 10, 10] });
 
     this.table.rows.on('select', (item, idx) => {
+      if (!this.running) return;
+
       this.currentMarket = this.data.currentPrice[idx].name;
       this.updatePriceTrend();
     })
@@ -71,13 +93,36 @@ class Whale {
       { style: {
           baseline: this.config.colors.chartBaseline
         , text: this.config.colors.chartText }
+      , label: ` ${this.currentMarket} -- Price Trend -- (No Data) `
       , showLegend: this.config.showLegend });
 
-    this.log = this.grid.set(11, 6, 1, 6, contrib.log,
-      { fg: this.config.colors.logFg
-      , selectedFg: this.config.colors.logSelectedFg
-      , label: { text: ' Log ', side: 'right' }});
-    this.log.setBack();
+    this.log = blessed.box({
+      top: '80%',
+      left: '50%',
+      width: '50%',
+      height: '20%',
+      border: { type: 'line' },
+      style: { fg: this.config.colors.logFg, border: { fg: this.config.colors.logBorder } },
+      padding: { left: 2, top: 1, bottom: 1, right: 2 },
+      label: ' Log ',
+    });
+    this.log.hide();
+    this.screen.append(this.log);
+
+    this.error = blessed.box({
+      top: 'center',
+      left: 'center',
+      width: '50%',
+      height: '50%',
+      align: 'center',
+      valign: 'middle',
+      border: { type: 'line' },
+      style: { fg: 'red', border: { fg: 'red' } },
+      padding: { left: 2, top: 1, bottom: 1, right: 2 },
+      label: ' Error -- Press Enter to close ',
+    });
+    this.error.hide();
+    this.screen.append(this.error);
 
     this.help = blessed.box({
       top: 'center',
@@ -95,6 +140,8 @@ class Whale {
 
     this.updateTable();
     this.updateLine();
+
+    this.screen.render();
   }
 
   eventListeners() {
@@ -110,6 +157,7 @@ class Whale {
     });
 
     this.screen.key(['escape', 'q', 'C-c'], (ch, key) => {
+      if (this.help.visible) return this.toggleHelp();
       this.timer && clearInterval(this.timer)
       return process.exit(0)
     });
@@ -120,7 +168,6 @@ class Whale {
   }
 
   drawHelp() {
-    console.log(this.exchange);
     // Periods
     let str = "PriceTrend interval: [key] interval\r\n";
     let key = 1;
@@ -132,18 +179,22 @@ class Whale {
   }
 
   updateTable() {
+    if (!this.running) return;
+
     this.table.setData({
       headers: this.config.tableHeaders ? ['Market', 'Price', 'Change'] : [],
       data: wash.currentPrice(this.exchange, this.data.currentPrice)
     });
 
     const lastUpdate = utils.formatCurrentTime(this.lastUpdate);
-    this.table.setLabel(` ${this.exchange.name} -- Current Price -- (${lastUpdate}) `);
+    this.table.setLabel(` ${icons.whale}  ${this.exchange.name} -- Current Price -- (${lastUpdate}) `);
     this.table.focus();
     this.screen.render();
   }
 
   updateLine() {
+    if (!this.running) return;
+
     const data   = this.data.priceTrend;
     const series = { title: data.currentMarket
                    , x: data.labels
@@ -156,7 +207,9 @@ class Whale {
   }
 
   updateCurrentPrice() {
-    this.createLog(`Fetching current prices...`);
+    if (!this.running) return;
+
+    this.logMsg(`Fetching current prices...`);
     api.getCurrentPrice(this.exchange, this.markets).then((res) => {
       this.data.currentPrice = res;
       this.lastUpdate = new Date();
@@ -166,7 +219,9 @@ class Whale {
   }
 
   updatePriceTrend() {
-    this.createLog(`Fetching ${this.currentMarket} price trend...`)
+    if (!this.running) return;
+
+    this.logMsg(`Fetching ${this.currentMarket} price trend...`);
     api.getPriceTrend(this.exchange, this.currentMarket, null, this.currentPeriod).then((data) => {
       this.data.priceTrend = data;
       this.updateLine();
@@ -174,14 +229,33 @@ class Whale {
     }).catch(this.errorHandler.bind(this));
   }
 
-  createLog(data) {
-    this.log.setFront();
-    this.log.log(data);
+  logMsg(msg) {
+    this.log.style.fg = this.config.colors.logFg;
+    this.log.style.border.fg = this.config.logBorder;
+
+    this.log.show();
+    this.log.setContent(msg);
+    this.screen.render();
+  }
+
+  logError(msg, cb) {
+    this.error.show();
+    this.error.setContent(msg);
+    this.error.focus();
+
+    this.screen.onceKey(['enter'], (ch, key) => {
+      this.error.hide();
+      this.table.focus();
+      this.screen.render();
+      if(cb) cb();
+    });
+
     this.screen.render();
   }
 
   hideLog() {
-    this.log.setBack();
+    this.log.hide();
+    this.log.logLines = [];
     this.screen.render();
   }
 
@@ -190,8 +264,14 @@ class Whale {
     this.screen.render();
   }
 
-  errorHandler(from, err) {
-    console.error(`[FATAL][${from || '?'}]`, err);
+  errorHandler(err, cb) {
+    cb = typeof cb === 'function' ? cb : null;
+    if (err.response && err.response.request) {
+      this.logError(`HTTP Error ${err.status}`, cb);
+      return;
+    }
+
+    console.error('[FATAL]', err, cb);
     process.exit(1);
   }
 }

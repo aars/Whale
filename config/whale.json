@@ -9,8 +9,8 @@
     "tableFg": "cyan",
     "tableSelectedFg": "white",
     "tableSelectedBg": "cyan",
-    "logFg": "green",
-    "logSelectedFg": "green",
+    "logFg": "white",
+    "logBorder": "white",
     "chartLine": "yellow",
     "chartText": "yellow",
     "chartBaseline": "black"
